@@ -130,6 +130,3 @@ Use somente uma instância de teste. Não se usa EF InMemory; a ausência de Pos
 
 Cobertura: criação/Location/consulta, reserva, saldo insuficiente, validações, chave obrigatória, ETF inexistente, replay após esgotar saldo, conflitos em cada campo, isolamento entre clientes, concorrência com chaves iguais e distintas, conteúdo concorrente conflitante, rollback e bloqueio de execução em Production. Consulte [o registro de validação](docs/validacao.md) para o resultado efetivamente executado.
 
-## Leitura para a entrevista
-
-Comece por [requisitos](docs/requisitos.md) e depois [arquitetura e decisões](docs/arquitetura.md). Os objetivos de throughput e latência **ainda não foram medidos**. Outbox, broker, consumidor e execução simulada estão apenas documentados como evolução.
