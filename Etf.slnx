@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Etf.Api/Etf.Api.csproj" />
+    <Project Path="src/Etf.Application/Etf.Application.csproj" />
+    <Project Path="src/Etf.Domain/Etf.Domain.csproj" />
+    <Project Path="src/Etf.Infrastructure/Etf.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Etf.Tests/Etf.Tests.csproj" />
+  </Folder>
+</Solution>
