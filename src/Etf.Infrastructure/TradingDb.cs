@@ -8,6 +8,8 @@ public sealed class TradingDb(DbContextOptions<TradingDb> options) : DbContext(o
     public DbSet<Fund> Funds => Set<Fund>();
     public DbSet<Order> Orders => Set<Order>();
     public DbSet<OrderTransition> OrderTransitions => Set<OrderTransition>();
+    public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+    public DbSet<ProcessedEvent> ProcessedEvents => Set<ProcessedEvent>();
     protected override void OnModelCreating(ModelBuilder b)
     {
         b.Entity<Account>(e => {
@@ -47,6 +49,18 @@ public sealed class TradingDb(DbContextOptions<TradingDb> options) : DbContext(o
             e.Property(x => x.ToStatus).HasConversion<string>().HasMaxLength(32);
             e.HasIndex(x => new { x.OrderId, x.ToStatus }).IsUnique();
             e.HasIndex(x => x.OrderId).IsUnique().HasFilter("\"ToStatus\" <> 'PendingExecution'");
+        });
+        b.Entity<OutboxMessage>(e => {
+            e.HasKey(x => x.EventId);
+            e.Property(x => x.Type).HasMaxLength(100);
+            e.Property(x => x.Payload).HasColumnType("jsonb");
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(32);
+            e.Property(x => x.Error).HasMaxLength(1000);
+            e.HasIndex(x => new { x.Status, x.CreatedAt });
+        });
+        b.Entity<ProcessedEvent>(e => {
+            e.HasKey(x => x.EventId);
+            e.HasIndex(x => x.OrderId);
         });
     }
 }

@@ -27,8 +27,16 @@ Clientes e contas já existem. Cadastro, Pix, taxas, execução parcial, cancela
 6. Mesma chave e conteúdo válido: mesma ordem, timestamp, valores e Location, inclusive após esgotar saldo. Números JSON podem ter zeros finais distintos, mantendo o mesmo valor.
 7. Mesma chave e conteúdo válido diferente: 409. Conteúdo estruturalmente inválido é rejeitado com 400 antes da busca da chave.
 8. Validar ETF existente e saldo suficiente; reservar e inserir ordem numa única transação. Nenhuma requisição concorrente pode reutilizar saldo já reservado.
-9. Só retornar 201 após commit confirmado. `Location` aponta para `/orders/{id}` e o corpo informa `PendingExecution`.
+9. Só retornar 201 após commit confirmado. `Location` aponta para `/orders/{id}` e o corpo informa `PendingExecution`. A mesma transação grava uma mensagem `OrderCreated` na outbox.
 10. Consulta inclui `ClientId` no filtro. Ordem de outro cliente e ordem ausente retornam 404, evitando revelar sua existência.
+
+## Etapa 3: outbox e processamento assíncrono
+
+Cada ordem cria um evento `OrderCreated` versionado (`ContractVersion = 1`) em `OutboxMessages`, com payload JSON e estado `Pending`. Um publisher busca lotes pequenos, publica no broker local em memória e só depois marca `Published`. Falha no broker incrementa tentativas; após o limite, o estado é `DeadLetter` para tratamento operacional. O publisher não mantém a transação do banco aberta durante a publicação.
+
+O consumidor recebe o evento e usa um simulador determinístico para decidir `Executed`, `Rejected` ou `TemporaryFailure`. `ProcessedEvents` deduplica por `EventId`; execução repetida não move saldo. Conta e ordem são bloqueadas na ordem conta → ordem, igual ao fluxo de criação. Efeitos financeiros e o registro de processamento ficam na mesma transação.
+
+O banco garante atomicidade da ordem, reserva e outbox. A entrega entre banco e broker é at-least-once, portanto duplicatas continuam possíveis. A aplicação garante o efeito financeiro único por deduplicação persistente e transições idempotentes. Não há broker externo, worker implantável separado ou garantia exactly-once.
 
 ## Metas futuras, não resultados
 

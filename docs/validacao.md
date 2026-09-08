@@ -34,4 +34,14 @@ A primeira suíte teve 19 aprovações e duas falhas de comparação textual de 
 
 ## O que não foi comprovado
 
-Não foram executados testes de carga, medição de p95, múltiplas instâncias da API, queda de processo durante commit, failover ou restauração de backup. Os 2 segundos da suíte não representam latência da API. As metas de 100/1.000 solicitações por segundo, 3.000 consultas por segundo e p95 de 500 ms continuam sendo requisitos a validar. Nenhuma compra foi executada.
+Não foram executados testes de carga, medição de p95, múltiplas instâncias da API, queda de processo durante commit, failover ou restauração de backup. Os 2 segundos da suíte não representam latência da API. As metas de 100/1.000 solicitações por segundo, 3.000 consultas por segundo e p95 de 500 ms continuam sendo requisitos a validar. Nenhuma compra real foi executada.
+
+## Etapa 3 — outbox
+
+Após a etapa anterior, apliquei somente as migrations `OrderExecution` e `TransactionalOutbox` no banco demo. A ordem existente `d587cc6f-560e-477e-acdb-cbee0b591c2d` e os saldos foram preservados. O schema passou a ter `OrderTransitions`, `OutboxMessages` e `ProcessedEvents`, além das tabelas anteriores.
+
+A suíte final executada em PostgreSQL real aprovou **56 testes, zero falhas e zero ignorados**. Os 48 testes da etapa de execução continuam passando; os 8 novos cobrem criação atômica de outbox, rollback, publisher, falha/retry/DLQ, duplicata de consumidor, concorrência do consumidor e falha temporária.
+
+Também executei um smoke test HTTP Development: uma nova ordem criou uma outbox, `/development/outbox/publish` publicou um evento e marcou `Published`, e `/development/outbox/consume/{eventId}` executou a ordem a 9,00. O banco confirmou o evento `OrderCreated` com `Attempts = 1`, `Status = Published`, e a ordem `Executed` com `ExecutedAmount = 9,00`. Esse smoke test usou a conta demo Alice e, portanto, alterou seus dados de estudo de forma deliberada: ela ficou com 740,00 disponíveis e 251,00 reservados (a ordem original continua pendente); Bob não foi alterado.
+
+O publisher faz lotes de até 100, incrementa tentativas antes da publicação, aplica um backoff mínimo configurável de um segundo entre tentativas e marca `DeadLetter` após o limite. A janela de queda entre publicação e `MarkPublished` continua permitindo duplicatas; o consumidor usa `ProcessedEvents` dentro da mesma transação da execução para que a duplicata não mova saldo novamente.

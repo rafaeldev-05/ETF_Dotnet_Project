@@ -128,15 +128,18 @@ public sealed partial class OrderTests
         var id = await CreatePending();
         decimal? price = outcome == "Executed" ? 120m : null;
         var first = await Simulate(id, outcome, price);
+        var firstJson = await Json(first);
         var replay = await Simulate(id, outcome, price);
+        var replayJson = await Json(replay);
         Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
-        Assert.True(JsonElement.DeepEquals(await Json(first), await Json(replay)));
+        Assert.True(JsonElement.DeepEquals(firstJson, replayJson));
         await AssertFunds(outcome == "Executed" ? 760 : 1000, 0);
         await AssertOrder(id, outcome == "Executed" ? OrderStatus.Executed : OrderStatus.Rejected, price, price * 2);
         var creationReplay = await Post(key: "execution", quantity: 2, price: 125.50m);
         Assert.Equal(HttpStatusCode.Created, creationReplay.StatusCode);
-        Assert.Equal(id, (await Json(creationReplay)).GetProperty("id").GetGuid());
-        Assert.Equal(outcome, (await Json(creationReplay)).GetProperty("status").GetString());
+        var creationJson = await Json(creationReplay);
+        Assert.Equal(id, creationJson.GetProperty("id").GetGuid());
+        Assert.Equal(outcome, creationJson.GetProperty("status").GetString());
         Assert.Equal(HttpStatusCode.Conflict, (await Post(key: "execution", quantity: 3)).StatusCode);
         await AssertFunds(outcome == "Executed" ? 760 : 1000, 0);
     }
@@ -195,7 +198,9 @@ public sealed partial class OrderTests
         var responses = await Race(_ => Simulate(id), 12);
         Assert.All(responses, r => Assert.Equal(HttpStatusCode.OK, r.StatusCode));
         var first = await Json(responses[0]);
-        foreach (var response in responses) Assert.True(JsonElement.DeepEquals(first, await Json(response)));
+        var responseJson = new List<JsonElement>();
+        foreach (var response in responses) responseJson.Add(await Json(response));
+        foreach (var value in responseJson) Assert.True(JsonElement.DeepEquals(first, value));
         await AssertOrder(id, OrderStatus.Executed, 120, 240);
         await AssertFunds(760, 0);
     }

@@ -2,6 +2,10 @@ using Etf.Domain;
 namespace Etf.Application;
 
 public sealed record CreateOrderRequest(string? Etf, int Quantity, decimal LimitPrice);
+public sealed record OrderCreatedV1(Guid EventId, Guid OrderId, Guid ClientId, string Etf, int Quantity, decimal LimitPrice,
+    decimal Reservation, DateTimeOffset OccurredAt, int ContractVersion = 1);
+public sealed record OutboxMessageView(Guid EventId, Guid OrderId, Guid ClientId, string Type, int ContractVersion,
+    string Payload, DateTimeOffset CreatedAt, string Status, int Attempts, DateTimeOffset? LastAttemptAt, string? Error);
 public sealed record TransitionView(OrderStatus? FromStatus, OrderStatus ToStatus, DateTimeOffset OccurredAt);
 public sealed record OrderView(Guid Id, string Etf, int Quantity, decimal LimitPrice,
     decimal Reservation, OrderStatus Status, DateTimeOffset CreatedAt, decimal? ExecutionPrice,
@@ -24,6 +28,7 @@ public interface IOrderStore
     Task<OrderView> ApplyResult(Guid clientId, Guid id, SimulationOutcome outcome, decimal? price, CancellationToken ct);
     Task<OrderView?> Find(Guid clientId, Guid id, CancellationToken ct);
     Task<IReadOnlyList<Fund>> Catalog(CancellationToken ct);
+    Task<bool> ConsumeCreated(OrderCreatedV1 message, SimulationOutcome outcome, decimal? price, CancellationToken ct);
 }
 public sealed class Orders(IOrderStore store)
 {

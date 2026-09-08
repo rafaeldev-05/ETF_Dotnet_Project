@@ -1,4 +1,5 @@
 using System.Data;
+using System.Text.Json;
 using Etf.Application;
 using Etf.Domain;
 using Microsoft.EntityFrameworkCore;
@@ -25,6 +26,16 @@ public sealed class PostgresOrderStore(TradingDb db) : IOrderStore
         if (!account.TryReserve(candidate.Reservation))
             throw new RequestFailure(409, "insufficient_balance", "Saldo disponível insuficiente.");
         db.Orders.Add(candidate);
+        var eventId = Guid.NewGuid();
+        var occurred = candidate.CreatedAt;
+        db.OutboxMessages.Add(new OutboxMessage
+        {
+            EventId = eventId, OrderId = candidate.Id, ClientId = candidate.ClientId,
+            Type = "OrderCreated", ContractVersion = 1,
+            Payload = JsonSerializer.Serialize(new OrderCreatedV1(eventId, candidate.Id, candidate.ClientId,
+                candidate.Etf, candidate.Quantity, candidate.LimitPrice, candidate.Reservation, occurred)),
+            CreatedAt = occurred, Status = OutboxStatus.Pending
+        });
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
         return OrderView.From(candidate);
@@ -57,6 +68,32 @@ public sealed class PostgresOrderStore(TradingDb db) : IOrderStore
         await db.SaveChangesAsync(ct);
         await tx.CommitAsync(ct);
         return OrderView.From(order);
+    }
+
+    public async Task<bool> ConsumeCreated(OrderCreatedV1 message, SimulationOutcome outcome, decimal? price, CancellationToken ct)
+    {
+        await using var tx = await db.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
+        var account = await LockAccount(message.ClientId, ct) ?? throw NotFound();
+        var order = await db.Orders.FromSqlInterpolated($"SELECT * FROM \"Orders\" WHERE \"Id\" = {message.OrderId} AND \"ClientId\" = {message.ClientId} FOR UPDATE")
+            .SingleOrDefaultAsync(ct) ?? throw NotFound();
+        await db.Entry(order).Collection(x => x.History).LoadAsync(ct);
+        var existing = await db.ProcessedEvents.SingleOrDefaultAsync(x => x.EventId == message.EventId, ct);
+        if (existing is not null) { await tx.CommitAsync(ct); return false; }
+        switch (outcome)
+        {
+            case SimulationOutcome.Executed:
+                if (order.Execute(price!.Value)) account.ConsumeReservation(order.Reservation, order.ExecutedAmount!.Value);
+                break;
+            case SimulationOutcome.Rejected:
+                if (order.Reject(ProcessOrderResult.DemoRejectionReason)) account.ReleaseReservation(order.Reservation);
+                break;
+            case SimulationOutcome.TemporaryFailure:
+                throw new InvalidOperationException("temporary consumer failure");
+        }
+        db.ProcessedEvents.Add(new ProcessedEvent { EventId = message.EventId, OrderId = message.OrderId, ProcessedAt = DateTimeOffset.UtcNow });
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
+        return true;
     }
 
     private Task<Account?> LockAccount(Guid id, CancellationToken ct) => db.Accounts

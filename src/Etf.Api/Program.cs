@@ -14,6 +14,11 @@ builder.Services.AddDbContext<TradingDb>(o => o.UseNpgsql(builder.Configuration.
 builder.Services.AddScoped<IOrderStore, PostgresOrderStore>();
 builder.Services.AddScoped<Orders>();
 builder.Services.AddScoped<ProcessOrderResult>();
+builder.Services.AddScoped<IOutboxStore, PostgresOutboxStore>();
+builder.Services.AddSingleton<InMemoryBroker>();
+builder.Services.AddSingleton<ILocalBroker>(sp => sp.GetRequiredService<InMemoryBroker>());
+builder.Services.AddScoped<OutboxPublisher>();
+builder.Services.AddScoped<OrderConsumer>();
 var app = builder.Build();
 app.UseExceptionHandler();
 app.UseStatusCodePages();
@@ -42,6 +47,26 @@ if (app.Environment.IsDevelopment())
     app.MapPost("/development/orders/{id:guid}/result", async (Guid id, SimulationRequest request,
         HttpContext context, ProcessOrderResult process, CancellationToken ct) =>
         Results.Ok(await process.Apply(DemoClient(context), id, request, ct)));
+    app.MapPost("/development/outbox/publish", async (int? batchSize, OutboxPublisher publisher, CancellationToken ct) =>
+        Results.Ok(new { published = await publisher.PublishBatch(batchSize ?? 10, 5, ct) }));
+    app.MapGet("/development/outbox/messages", async (TradingDb db, CancellationToken ct) =>
+        Results.Ok(await db.OutboxMessages.AsNoTracking().OrderBy(x => x.CreatedAt).ToListAsync(ct)));
+    app.MapPost("/development/outbox/consume/{eventId:guid}", async (Guid eventId, SimulationRequest request,
+        OrderConsumer consumer, TradingDb db, HttpContext context, CancellationToken ct) =>
+    {
+        var row = await db.OutboxMessages.AsNoTracking().SingleOrDefaultAsync(x => x.EventId == eventId, ct);
+        if (row is null) return Results.NotFound();
+        var message = System.Text.Json.JsonSerializer.Deserialize<OrderCreatedV1>(row.Payload)!;
+        var outcome = request.Outcome switch
+        {
+            "Executed" => SimulationOutcome.Executed,
+            "Rejected" => SimulationOutcome.Rejected,
+            "TemporaryFailure" => SimulationOutcome.TemporaryFailure,
+            _ => throw new RequestFailure(400, "invalid_simulation", "Outcome inválido.")
+        };
+        var processed = await consumer.Consume(message, outcome, request.ExecutionPrice, ct);
+        return Results.Ok(new { processed, orderId = message.OrderId });
+    });
 }
 if (args.Contains("--seed-demo"))
 {

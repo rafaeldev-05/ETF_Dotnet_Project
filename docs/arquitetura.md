@@ -57,10 +57,24 @@ Dinheiro usa `decimal`/`numeric(18,2)`, sem `double`. Valores incompatíveis sã
 
 Desenhe “Cliente fictício” à esquerda e um retângulo grande “Monólito ASP.NET Core” ao centro. Dentro dele, três caixas em sequência: “API / identidade demo” → “Aplicação / criar ordem” → “Infra / EF Core”. Abaixo da aplicação, uma caixa “Domínio / conta, ordem, dinheiro”, usada pela aplicação e infraestrutura.
 
-À direita, um cilindro “PostgreSQL” com “Accounts”, “Funds” e “Orders”. Ligue Infra ao banco com seta “transação: lock conta → idempotência → reserva + ordem → commit”. Desenhe a resposta ao cliente “201 + Location + PendingExecution”. Escreva junto à conta “fila por conta; contas distintas em paralelo”. Não desenhe broker no fluxo atual.
+À direita, desenhe o banco assim:
+
+```text
+API → PostgreSQL
+          ├── Orders
+          ├── Accounts
+          └── OutboxMessages
+
+Publisher → Broker em memória
+Broker → Consumer → PostgreSQL
+```
+
+Ligue `API` ao PostgreSQL com a seta “transação: lock conta → idempotência → reserva + ordem + outbox → commit”. Aponte Publisher para “lote pending; publica fora da transação; marca Published depois”. Aponte Consumer para “deduplica EventId; lock conta → ordem; executa ou rejeita; grava ProcessedEvents”. Escreva “at-least-once” entre Broker e Consumer e “contas distintas em paralelo” junto ao lock da conta.
 
 ## Evolução futura — ainda não implementada
 
-Quando adicionarmos execução simulada, uma outbox poderá gravar um evento na mesma transação da ordem. Um publicador lerá a outbox e enviará ao broker; um consumidor idempotente verificará as condições do preço limite e realizará a execução fictícia. Publicação e consumo devem tolerar duplicatas, falhas e reentrega. Não assumiremos uma transação distribuída entre banco e broker.
+Nesta etapa, a outbox, publisher, broker em memória e consumidor idempotente estão implementados no mesmo monólito para estudo. O broker transporta o contrato `OrderCreatedV1`; o simulador decide deterministicamente o resultado. A publicação pode duplicar dentro da janela “publicou, caiu antes de marcar Published”, e `ProcessedEvents` absorve a duplicata.
 
-Precisaremos definir estados, preço simulado, liberação/consumo da reserva, retries e observabilidade antes de implementar. Nenhum broker, consumidor, cache, outbox, Kubernetes ou microsserviço existe nesta etapa. Autenticação real e testes de carga também ficam para evolução deliberada.
+Uma evolução futura substituirá o broker local por um broker externo e moverá publisher/consumer para processos implantáveis separadamente. Outbox, broker e banco continuarão sem transação distribuída; retries, backoff, observabilidade e DLQ operacional precisarão de políticas reais. Kubernetes, Kafka e RabbitMQ não fazem parte desta etapa.
+
+Autenticação real e testes de carga ficam para evolução deliberada. O broker local não é um serviço implantável e não representa disponibilidade ou durabilidade de produção.

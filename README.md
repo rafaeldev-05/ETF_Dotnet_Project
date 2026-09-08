@@ -1,6 +1,6 @@
 # Solicitações fictícias de compra de ETFs
 
-Projeto de estudo de System Design em C#/.NET. Receber uma ordem **não executa uma compra**: o backend reserva saldo e persiste `PendingExecution`. Nenhuma operação financeira real é realizada.
+Projeto de estudo de System Design em C#/.NET. Receber uma ordem **não executa uma compra**: o backend reserva saldo, persiste `PendingExecution` e grava um `OrderCreated` na outbox na mesma transação. Publisher e consumidor são componentes de demonstração; nenhuma operação financeira real é realizada.
 
 ## Ambiente e preparação
 
@@ -37,6 +37,28 @@ dotnet ef database update --project src/Etf.Infrastructure --startup-project src
 dotnet run --project src/Etf.Api --no-build -- --seed-demo
 dotnet run --project src/Etf.Api --no-build -- --urls http://localhost:5080
 ```
+
+Após atualizar um banco existente, aplique a migration incremental normalmente; ela não reinicializa nem apaga as tabelas existentes.
+
+### Outbox e execução Development
+
+Uma nova ordem cria exatamente uma linha em `OutboxMessages`, junto com a ordem e a reserva. O publisher em memória é acionado manualmente apenas em Development:
+
+```sh
+curl -i -X POST 'http://localhost:5080/development/outbox/publish?batchSize=10'
+curl -s http://localhost:5080/development/outbox/messages | jq
+```
+
+Para consumir um evento, copie seu `eventId` e envie um resultado determinístico:
+
+```sh
+curl -i -X POST http://localhost:5080/development/outbox/consume/EVENT_ID \\
+  -H 'Content-Type: application/json' \\
+  -H 'X-Demo-Client-Id: 11111111-1111-1111-1111-111111111111' \\
+  -d '{"outcome":"Executed","executionPrice":120.00}'
+```
+
+Também é possível usar `/development/orders/{id}/result` diretamente para estudar o caso de execução. `TemporaryFailure` mantém a ordem pendente; o publisher pode tentar novamente até `maxAttempts` e então marca `DeadLetter`. A publicação é at-least-once: se o processo cair depois do broker aceitar e antes de `Published`, o evento pode ser publicado novamente. O consumidor persiste `ProcessedEvents` e a execução financeira é idempotente.
 
 O PostgreSQL 17 fica em `127.0.0.1:55432`, banco `etf`, usuário `etf`, senha fictícia `etf_demo_only`. O volume mantém os dados entre reinícios. Para parar preservando os dados: `docker compose stop`. Não execute remoção de volumes se quiser preservar as ordens de estudo.
 
@@ -130,3 +152,6 @@ Use somente uma instância de teste. Não se usa EF InMemory; a ausência de Pos
 
 Cobertura: criação/Location/consulta, reserva, saldo insuficiente, validações, chave obrigatória, ETF inexistente, replay após esgotar saldo, conflitos em cada campo, isolamento entre clientes, concorrência com chaves iguais e distintas, conteúdo concorrente conflitante, rollback e bloqueio de execução em Production. Consulte [o registro de validação](docs/validacao.md) para o resultado efetivamente executado.
 
+## Leitura para a entrevista
+
+Comece por [requisitos](docs/requisitos.md) e depois [arquitetura e decisões](docs/arquitetura.md). Os objetivos de throughput e latência **ainda não foram medidos**. Outbox, broker local, consumidor e execução simulada estão implementados para estudo; broker externo e processos separados continuam sendo evolução.
